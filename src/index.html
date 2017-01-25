@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+    <head>
+      <!--import Pako
+        NOTE: this is included in the dist PNGDecoder
+      -->
+      <script type='text/javascript' src='external/Pako/pako_inflate.min.js'></script>
+      <!--import PNGDecoder.js
+        Note: Pako must be loaded before this
+      -->
+      <script type='text/javascript' src='js/PNGDecoder.js'></script>
+    </head>
+    <body style='margin: 0; background-color: #333;'>
+      <script>
+        PNGDecoder(
+        'http://i.imgur.com/hBrzS9O.png', //[x] Gears PLTE
+        //'http://i.imgur.com/4BTadWF.png', //[x] Dinosaurs F01
+        //'http://i.imgur.com/6MCIS.png', //[] Snowy Mountain F
+        //'https://i.imgur.com/MJma1zV.png', //[] Autumn RGBA
+        //'http://i.imgur.com/7f3AnsG.png', //[x] Pixel Warrior PLTE
+        //'http://i.imgur.com/EPBbVXu.jpg', //[] cavern Road RGBA Alpha
+        //'http://i.imgur.com/BtqUiXp.jpg', //[] Hashbrown RGAB Alpha
+        //'http://i.imgur.com/Ttwkeg7.jpg', //[] Skeleton Bird iCCP?
+        function( PNGcanvas ) {
+          //PNGcanvas is a document canvas element
+          document.body.appendChild( PNGcanvas );
+          }
+        );
+      </script>
+    </body>
+</html>
