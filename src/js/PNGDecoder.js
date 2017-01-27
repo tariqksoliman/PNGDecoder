@@ -28,29 +28,39 @@ var PNGDecoder = function( url, callback ) {
     var inflator = new pako.Inflate();
     var chunks = [];
     var palette;
+    var ancillaries = {
+      gAMA: 1
+    };
+
     //Check if file is a valid PNG
     if( getSignature( data, i ) ) {
       //Get the header
       var header = getHeader( data, i );
-      //console.log( header );
+      console.log( header );
       //Get all the chunks
       while( i.i < data.length ) {
         chunks.push( getNextChunk( data, i ) );
       }
       //Put all the data chunks into our decompressor
       for( var j = 0; j < chunks.length; j++ ) {
-        //console.log( chunks[j].type.full );
-        if( chunks[j].type.full == 'IDAT' ) {
-          //Our inflator needs to know which chunk is last
-          if( j != chunks.length - 1 && chunks[j+1].type.full == 'IEND' ) {
-            inflator.push( chunks[j].data, true ); //tre for last
-          }
-          else {
-            inflator.push( chunks[j].data, false );
-          }
-        }
-        else if( chunks[j].type.full == 'PLTE' ) {
-          palette = usePalette( chunks[j] );
+        console.log( chunks[j].type.full );
+        switch( chunks[j].type.full ) {
+          case 'IDAT':            //Our inflator needs to know which chunk is last
+              if( j != chunks.length - 1 && chunks[j+1].type.full == 'IEND' ) {
+                inflator.push( chunks[j].data, true ); //true for last
+              }
+              else {
+                inflator.push( chunks[j].data, false );
+              }
+            break;
+          case 'PLTE':
+              palette = usePalette( chunks[j] );
+            break;
+          //Ancillary chunks now
+          case 'gAMA':
+              ancillaries.gAMA = useGamma( chunks[j] );
+              console.log( 'Gamma: ' + ancillaries.gAMA );
+            break;
         }
       }
       if( inflator.err ) {
@@ -58,10 +68,10 @@ var PNGDecoder = function( url, callback ) {
       }
 
       var output = inflator.result;
-      return makeCanvasFromInflatedFullIDAT( header, output, palette );
+      return makeCanvasFromInflatedFullIDAT( header, output, palette, ancillaries );
     }
     else {
-      throw new Error( 'File is not a valid PNG' );
+      console.error( 'File is not a valid PNG' );
     }
     return false;
   }
@@ -182,6 +192,8 @@ var PNGDecoder = function( url, callback ) {
     return header;
   }
 
+  //Ancilalry chunk setters
+
   function usePalette( plte ) {
     var palette = [];
     if( plte.data.length % 3 != 0 ) return;
@@ -189,6 +201,12 @@ var PNGDecoder = function( url, callback ) {
       palette.push( { r: plte.data[i], g: plte.data[i+1], b: plte.data[i+2] } );
     }
     return palette;
+  }
+
+  function useGamma( gama ) {
+    var gamma = null;
+    var rawGamma = get4ByteInt( gama.data, 0 );
+    return rawGamma / 100000;
   }
 
   function getNextChunk( data, i ) {
@@ -227,7 +245,8 @@ var PNGDecoder = function( url, callback ) {
   }
 
   //Takes in decompressed IDAT data, unfilters it, draws it to a canvas and returns the canvas.
-  function makeCanvasFromInflatedFullIDAT( header, data, palette ) {
+  function makeCanvasFromInflatedFullIDAT( header, data, palette, ancillaries ) {
+    console.log(data);
     var width = header.data.width;
     var height = header.data.height;
 
@@ -245,10 +264,11 @@ var PNGDecoder = function( url, callback ) {
       case 4: bands = 2; break; //greyscale A
       case 6: bands = 4; break; //RGBA
     }
-    //console.log( bands + ' bands' );
+    console.log( bands + ' band(s)' );
 
     var dataindex = 0;
     var imgdataindex = 0;
+    var pixdataindex = 0;
 
     if( palette ) {
       var color;
@@ -269,20 +289,60 @@ var PNGDecoder = function( url, callback ) {
       }
     }
     else {
+      var rawPixelData = [];
       var filter;
+
+      var testfilt = [0, 20, 40,
+                      4, 8, 7];
+      console.log('=====================================');
+      //console.log( unfilter( testfilt, 0, 1, 2, 2, 1, 8) );
+      //console.log( unfilter( testfilt, 1, 4, 2, 2, 1, 8) )
+      console.log( unfilter( testfilt, 5, 4, 2, 2, 1, 8) )
+      //console.log( unfilter( testfilt, 3, 2, 2, 2, 1, 8) )
+      console.log( testfilt );
+      //return canvas;
 
       for( var y = 0; y < height; y++ ) {
         //1 because the first byte of each scanline indicates its filter
         dataindex += 1;
-        filter = data[ y * ((width*bands) + 1) ]; console.log( filter );
 
-        for( var x = 1; x < width + 1; x++ ) {
-          imgData.data[ imgdataindex + 0 ] = unfilter( data, dataindex + 0, filter, width, height, bands ); //Red
-          imgData.data[ imgdataindex + 1 ] = unfilter( data, dataindex + 1, filter, width, height, bands ); //Green
-          imgData.data[ imgdataindex + 2 ] = unfilter( data, dataindex + 2, filter, width, height, bands ); //Blue
-          imgData.data[ imgdataindex + 3 ] = ( bands == 5 ) ? unfilter( data, dataindex + 3, filter, width, height, bands ) : 255; //Alpha
+        //filter = data[ y * ((width*bands) + 1) ];
+        filter = getFilter( data, y, header.data.bitdepth, bands, width );
+ 
+        if( !(filter >= 0 && filter <= 4) ) return canvas;
 
+        for( var x = 0; x < ( ( width / ( 8 / header.data.bitdepth ) ) ); x++ ) {
+          for( var b = 0; b < bands; b++ ) {
+            rawPixelData.push( unfilter( data, dataindex + b, filter, width, height, bands, header.data.bitdepth ) );
+          }
           dataindex += bands;
+        }
+      }
+
+      //Move data into correct bitdepth
+      console.log( rawPixelData );
+      var pixelData = Uint8To( header.data.bitdepth, rawPixelData );
+      console.log(pixelData);
+      var scalar = 255 / ( Math.pow( 2, header.data.bitdepth ) - 1 );
+      
+      for( var y = 0; y < height; y++ ) {
+      
+        for( var x = 0; x < width; x++ ) {
+          switch( header.data.colortype ) {
+            case 0: 
+              //console.log( unfilter( data, dataindex, filter, width, height, bands ) * scalar );
+              imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Red
+              imgData.data[ imgdataindex + 1 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Green
+              imgData.data[ imgdataindex + 2 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Blue
+              imgData.data[ imgdataindex + 3 ] = 255; //Alpha
+              break;
+            default:
+              imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( pixelData[ pixdataindex + 0 ] / 255, 1 / ancillaries.gAMA ); //Red
+              imgData.data[ imgdataindex + 1 ] = 255 * Math.pow( pixelData[ pixdataindex + 1 ] / 255, 1 / ancillaries.gAMA ); //Green
+              imgData.data[ imgdataindex + 2 ] = 255 * Math.pow( pixelData[ pixdataindex + 2 ] / 255, 1 / ancillaries.gAMA ); //Blue
+              imgData.data[ imgdataindex + 3 ] = ( bands == 4 ) ? pixelData[ pixdataindex + 3 ] : 255; //Alpha
+          }
+          pixdataindex += bands;
           imgdataindex += 4;
         }
       }
@@ -308,13 +368,57 @@ var PNGDecoder = function( url, callback ) {
     return String.fromCharCode( byte );
   }
 
-  function unfilter( data, index, filter, width, height, bands ) {
+  function Uint8To( bitdepth, data ) {
+    var newData = [];
+    switch( bitdepth ) {
+      case 1:
+          for( var i = 0; i < data.length; i++ ) {
+            var bytestr = padByteString( data[i].toString(2) );
+            for( var c = 0; c < 8; c++ ) {
+              newData.push( parseInt( bytestr[c], 2 ) );
+            }
+          }
+        break;
+      case 2:
+          for( var i = 0; i < data.length; i++ ) {
+            var bytestr = padByteString( data[i].toString(2) );
+            
+            newData.push( parseInt( bytestr.substr( 0, 2 ), 2 ) );
+            newData.push( parseInt( bytestr.substr( 2, 2 ), 2 ) );
+            newData.push( parseInt( bytestr.substr( 4, 2 ), 2 ) );
+            newData.push( parseInt( bytestr.substr( 6, 2 ), 2 ) );
+          }
+        break;
+      case 4:
+          for( var i = 0; i < data.length; i++ ) {
+            var bytestr = padByteString( data[i].toString(2) );
+            newData.push( parseInt( bytestr.substr( 0, 4 ), 2 ) );
+            newData.push( parseInt( bytestr.substr( -4 ), 2 ) );
+          }
+        break;
+      case 16:
+          for( var i = 0; i < data.length; i += 2 ) {
+            var bytestr = padByteString( data[i].toString(2) ) + padByteString( data[i+1].toString(2) );
+            newData.push( parseInt( bytestr, 2 ) );
+          }
+        break;
+      default:
+        return data;
+    }
+    return newData;
+  }
+
+  function getFilter( data, line, bitdepth, bands, width ) {
+    return data[ line * ( ( ( width / ( 8 / bitdepth ) ) * bands ) + 1 ) ];
+  }
+
+  function unfilter( data, index, filter, width, height, bands, bitdepth ) {
     //x	the byte being filtered;
     //a	the byte corresponding to x in the pixel immediately before the pixel containing x (or the byte immediately before x, when the bit depth is less than 8);
     //b	the byte corresponding to x in the previous scanline;
     //c	the byte corresponding to b in the pixel immediately before the pixel containing b (or the byte immediately before b, when the bit depth is less than 8).
-    var bytesPerScanline = ( width * bands ) + 1;
-
+    var bytesPerScanline = ( ( width / ( 8 / bitdepth ) ) * bands ) + 1;
+    //console.log( 'bpsl: ' + bytesPerScanline );
     switch( filter ) {
       case 0:
         break;
@@ -331,7 +435,7 @@ var PNGDecoder = function( url, callback ) {
           data[index] = ( data[index] + paethFilter( getA(index), getB(index), getC(index) ) ) % 256;
         break;
       default:
-        throw new Error( 'Invalid filter algorithm.' );
+        console.error( 'Invalid filter algorithm' );
     }
 
     return data[index];
@@ -339,10 +443,11 @@ var PNGDecoder = function( url, callback ) {
     function getA( i, getI ) {
       var a = -1;
       var scanlineNum = Math.floor( i / bytesPerScanline );
-      var aScanlineNum = Math.floor( ( i - bands ) / bytesPerScanline );
+      //- 1 for filter byte
+      var aScanlineNum = Math.floor( ( i - bands - 1 ) / bytesPerScanline );
       //Make sure a is on the same scan line and is not the filter bit
       if( scanlineNum == aScanlineNum ) {
-        a = i - bands;
+        a = i - ( bands * Math.ceil( bitdepth / 8 ) );
       }
 
       if( getI ) {
