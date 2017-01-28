@@ -29,7 +29,8 @@ var PNGDecoder = function( url, callback ) {
     var chunks = [];
     var palette;
     var ancillaries = {
-      gAMA: 1
+      gAMA: 1,
+      sBit: null
     };
 
     //Check if file is a valid PNG
@@ -61,6 +62,11 @@ var PNGDecoder = function( url, callback ) {
               ancillaries.gAMA = useGamma( chunks[j] );
               console.log( 'Gamma: ' + ancillaries.gAMA );
             break;
+          case 'sBIT':
+              ancillaries.sBIT = useSBIT( chunks[j] );
+              console.log( ancillaries.sBIT );
+            break;
+
         }
       }
       if( inflator.err ) {
@@ -206,7 +212,17 @@ var PNGDecoder = function( url, callback ) {
   function useGamma( gama ) {
     var gamma = null;
     var rawGamma = get4ByteInt( gama.data, 0 );
-    return rawGamma / 100000;
+    return rawGamma / 100000 * 2.2;
+  }
+
+  //sBIT tells us which bits of a data value are significant
+  function useSBIT( sbit ) {
+    var sigbits = [];
+    for( var i = 0; i < sbit.data.length; i++ ) {
+      sigbits[i] = sbit.data[i];
+    }
+
+    return sigbits;
   }
 
   function getNextChunk( data, i ) {
@@ -246,7 +262,7 @@ var PNGDecoder = function( url, callback ) {
 
   //Takes in decompressed IDAT data, unfilters it, draws it to a canvas and returns the canvas.
   function makeCanvasFromInflatedFullIDAT( header, data, palette, ancillaries ) {
-    console.log(data);
+    //console.log(data);
     var width = header.data.width;
     var height = header.data.height;
 
@@ -260,47 +276,54 @@ var PNGDecoder = function( url, callback ) {
     switch( header.data.colortype ) {
       case 0: bands = 1; break; //greyscale
       case 2: bands = 3; break; //RGB
-      case 3: bands = 0; break; //PLTE
+      case 3: bands = 1; break; //PLTE
       case 4: bands = 2; break; //greyscale A
       case 6: bands = 4; break; //RGBA
     }
-    console.log( bands + ' band(s)' );
+    //console.log( bands + ' band(s)' ); 
 
+    var rawPixelData = [];
+    var pixelData;
     var dataindex = 0;
     var imgdataindex = 0;
     var pixdataindex = 0;
-
+    var dataWidth =  ( width / ( 8 / header.data.bitdepth ) );
     if( palette ) {
-      var color;
-
       for( var y = 0; y < height; y++ ) {
-
+        //1 because the first byte of each scanline indicates its filter
         dataindex += 1;
+
+        for( var x = 0; x < dataWidth; x++ ) {
+          for( var b = 0; b < bands; b++ ) {
+            rawPixelData.push( data[dataindex + b] );
+          }
+          dataindex += bands;
+        }
+      }
+      //console.log(rawPixelData);
+      pixelData = Uint8To( header.data.bitdepth, ancillaries.sBIT, rawPixelData );
+      //console.log(pixelData);
+      var color;
+      dataindex = 0;
+      for( var y = 0; y < height; y++ ) {
         for( var x = 0; x < width; x++ ) {
-          color = palette[data[dataindex]] || { r: 0, g: 0, b: 0 };
-          imgData.data[ imgdataindex + 0 ] = color.r; //Red
-          imgData.data[ imgdataindex + 1 ] = color.g; //Green
-          imgData.data[ imgdataindex + 2 ] = color.b; //Blue
+          color = palette[pixelData[dataindex]] || { r: 0, g: 0, b: 0 };
+          imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( color.r / 255, 1 / ancillaries.gAMA ); //Red
+          imgData.data[ imgdataindex + 1 ] = 255 * Math.pow( color.g / 255, 1 / ancillaries.gAMA ); //Green
+          imgData.data[ imgdataindex + 2 ] = 255 * Math.pow( color.b / 255, 1 / ancillaries.gAMA ); //Blue
           imgData.data[ imgdataindex + 3 ] = ( bands == 4 ) ? 255 : 255; //Alpha
 
           dataindex += 1;
           imgdataindex += 4;
         }
+        //Odd sized images skip some
+        if( dataWidth % 1 !== 0 ) {
+          dataindex += 1;
+        }
       }
     }
     else {
-      var rawPixelData = [];
       var filter;
-
-      var testfilt = [0, 20, 40,
-                      4, 8, 7];
-      console.log('=====================================');
-      //console.log( unfilter( testfilt, 0, 1, 2, 2, 1, 8) );
-      //console.log( unfilter( testfilt, 1, 4, 2, 2, 1, 8) )
-      console.log( unfilter( testfilt, 5, 4, 2, 2, 1, 8) )
-      //console.log( unfilter( testfilt, 3, 2, 2, 2, 1, 8) )
-      console.log( testfilt );
-      //return canvas;
 
       for( var y = 0; y < height; y++ ) {
         //1 because the first byte of each scanline indicates its filter
@@ -311,7 +334,7 @@ var PNGDecoder = function( url, callback ) {
  
         if( !(filter >= 0 && filter <= 4) ) return canvas;
 
-        for( var x = 0; x < ( ( width / ( 8 / header.data.bitdepth ) ) ); x++ ) {
+        for( var x = 0; x < dataWidth; x++ ) {
           for( var b = 0; b < bands; b++ ) {
             rawPixelData.push( unfilter( data, dataindex + b, filter, width, height, bands, header.data.bitdepth ) );
           }
@@ -320,21 +343,24 @@ var PNGDecoder = function( url, callback ) {
       }
 
       //Move data into correct bitdepth
-      console.log( rawPixelData );
-      var pixelData = Uint8To( header.data.bitdepth, rawPixelData );
-      console.log(pixelData);
-      var scalar = 255 / ( Math.pow( 2, header.data.bitdepth ) - 1 );
-      
+      //console.log( rawPixelData );
+      pixelData = Uint8To( header.data.bitdepth, ancillaries.sBIT, rawPixelData );
+      //console.log(pixelData);
+      var scalar = ( Math.pow( 2, header.data.bitdepth ) - 1 );
+      //console.log(scalar);
+      var value;
       for( var y = 0; y < height; y++ ) {
       
         for( var x = 0; x < width; x++ ) {
           switch( header.data.colortype ) {
             case 0: 
-              //console.log( unfilter( data, dataindex, filter, width, height, bands ) * scalar );
-              imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Red
-              imgData.data[ imgdataindex + 1 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Green
-              imgData.data[ imgdataindex + 2 ] = 255 * Math.pow( pixelData[ pixdataindex ] / 255, 1 / ancillaries.gAMA ) * scalar; //Blue
+              value = scalar * Math.pow( pixelData[ pixdataindex ] / scalar, 1 / ancillaries.gAMA ) * ( 255 / scalar );
+              
+              imgData.data[ imgdataindex + 0 ] = value; //Red
+              imgData.data[ imgdataindex + 1 ] = value; //Green
+              imgData.data[ imgdataindex + 2 ] = value; //Blue
               imgData.data[ imgdataindex + 3 ] = 255; //Alpha
+              
               break;
             default:
               imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( pixelData[ pixdataindex + 0 ] / 255, 1 / ancillaries.gAMA ); //Red
@@ -368,20 +394,27 @@ var PNGDecoder = function( url, callback ) {
     return String.fromCharCode( byte );
   }
 
-  function Uint8To( bitdepth, data ) {
+  function Uint8To( bitdepth, sbit, data ) {
     var newData = [];
+    var bytestr;
+    var str;
     switch( bitdepth ) {
       case 1:
           for( var i = 0; i < data.length; i++ ) {
-            var bytestr = padByteString( data[i].toString(2) );
+            bytestr = padByteString( data[i].toString(2) );
+            if( sbit ) {
+              bytestr = bytestr.substr( 0, 8 - ( sbit[ i % sbit.length ] ) );
+            }
             for( var c = 0; c < 8; c++ ) {
-              newData.push( parseInt( bytestr[c], 2 ) );
+              str = parseInt( bytestr[c], 2 );
+              if( !isNaN( str ) )
+                newData.push( str );
             }
           }
         break;
       case 2:
           for( var i = 0; i < data.length; i++ ) {
-            var bytestr = padByteString( data[i].toString(2) );
+            bytestr = padByteString( data[i].toString(2) );
             
             newData.push( parseInt( bytestr.substr( 0, 2 ), 2 ) );
             newData.push( parseInt( bytestr.substr( 2, 2 ), 2 ) );
@@ -391,14 +424,14 @@ var PNGDecoder = function( url, callback ) {
         break;
       case 4:
           for( var i = 0; i < data.length; i++ ) {
-            var bytestr = padByteString( data[i].toString(2) );
+            bytestr = padByteString( data[i].toString(2) );
             newData.push( parseInt( bytestr.substr( 0, 4 ), 2 ) );
             newData.push( parseInt( bytestr.substr( -4 ), 2 ) );
           }
         break;
       case 16:
           for( var i = 0; i < data.length; i += 2 ) {
-            var bytestr = padByteString( data[i].toString(2) ) + padByteString( data[i+1].toString(2) );
+            bytestr = padByteString( data[i].toString(2) ) + padByteString( data[i+1].toString(2) );
             newData.push( parseInt( bytestr, 2 ) );
           }
         break;
