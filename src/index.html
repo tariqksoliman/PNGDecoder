@@ -10,8 +10,60 @@
       -->
       <script type='text/javascript' src='js/PNGDecoder.js'></script>
       <script type='text/javascript' src='js/Testing.js'></script>
+      <style>
+          body {
+            color: white;
+            margin: 0;
+            background-color: #262626;
+          }
+          pre {
+            position: fixed;
+            top: 0;
+            left: 0;
+          }
+          div {
+            width: 50%;
+            margin: 0 auto;
+            text-align: center;
+          }
+          canvas {
+            margin: 10px 10px 0px 10px;
+          }
+          p {
+            color: white;
+            margin-top: 0;
+          }
+      </style>
     </head>
-    <body style='margin: 0; background-color: #333;'>
+    <body>
+      <pre>
+  filename:                               g04i2c08.png
+                                          || ||||
+  test feature (in this case gamma) ------+| ||||
+  parameter of test (here gamma-value) ----+ ||||
+  interlaced or non-interlaced --------------+|||
+  color-type (numerical) ---------------------+||
+  color-type (descriptive) --------------------+|
+  bit-depth ------------------------------------+
+  
+  color-type:
+  0g - grayscale
+  2c - rgb color
+  3p - paletted
+  4a - grayscale + alpha channel
+  6a - rgb color + alpha channel
+
+  bit-depth:
+  01 - with color-type 0, 3
+  02 - with color-type 0, 3
+  04 - with color-type 0, 3
+  08 - with color-type 0, 2, 3, 4, 6
+  16 - with color-type 0, 2, 4, 6
+
+  interlacing:
+  n - non-interlaced
+  i - interlaced
+      </pre>
       <script>
         var test = false;
         test = true;

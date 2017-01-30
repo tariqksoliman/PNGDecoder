@@ -51,6 +51,19 @@ var Testing = function( type ) {
         order:        [],
         compression:  [],
         corrupt:      []
+        /*
+        ,
+        other: ['resources/testPNGs/ThePearple.png', //The Pearple
+                'http://i.imgur.com/hBrzS9O.png', //[x] Gears PLTE
+                'http://i.imgur.com/4BTadWF.png', //[x] Dinosaurs F01
+                'http://i.imgur.com/6MCIS.png', //[x] Snowy Mountain F
+                'https://i.imgur.com/MJma1zV.png', //[] Autumn RGBA
+                'http://i.imgur.com/7f3AnsG.png', //[x] Pixel Warrior PLTE
+                'http://i.imgur.com/EPBbVXu.jpg', //[] cavern Road RGBA Alpha
+                'http://i.imgur.com/BtqUiXp.jpg', //[x] Hashbrown RGAB Alpha
+                'http://i.imgur.com/Ttwkeg7.jpg', //[x] Skeleton Bird iCCP?
+                ]
+        */
     }
 
     //Set which urls we're testing with
@@ -63,8 +76,8 @@ var Testing = function( type ) {
     }
     else {
         if( testUrls.hasOwnProperty( type ) ) {
-            testingUrls = [testUrls[type][4]];
-            testingUrls = testUrls[type];
+            testingUrls = [testUrls[type][3]];
+            //testingUrls = testUrls[type];
         }
         else {
             console.warn( 'Unknown testing type.' );
@@ -77,34 +90,80 @@ var Testing = function( type ) {
     function testingURL( i ) {
         if( i >= testingUrls.length ) return; //Recursion terminator
         //Make Decoder canvas
+        console.time( 'PNGDecoder' )
         PNGDecoder( testingUrls[i],
-            function( PNGcanvas ) {
+            function( PNGcanvas, metadata ) {
+                console.log( metadata );
+                console.timeEnd( 'PNGDecoder' );
+                //Make it look nicer
+                var div = document.createElement( 'div' ); 
+                var p = document.createElement( 'p' );
                 //Make regular canvas
                 var img = new Image;
+                img.crossOrigin = 'Anonymous';
                 var REGcanvas = document.createElement( 'canvas' );
                 var ctx = REGcanvas.getContext( '2d' );
-                document.body.appendChild( PNGcanvas );              
-
+                div.appendChild( PNGcanvas );
+                
                 img.onload = function() {
+                    console.timeEnd( 'Default' );
                     REGcanvas.width = img.width;
                     REGcanvas.height = img.height;                 
                     ctx.drawImage( img, 0, 0 );
-                    document.body.appendChild( REGcanvas );
-                    
-                    if( compareCanvases( PNGcanvas, REGcanvas ) ) {
-                        console.info( 'PASSED: ' + testingUrls[i] );
+                    div.appendChild( REGcanvas );
+                    var maxPixDif = compareCanvases( PNGcanvas, REGcanvas );
+                    if( maxPixDif < 2 ) {
+                        p.setAttribute( 'style', 'color: #AAFFAA' );
+                        console.info( 'PASSED(' + maxPixDif + '): ' + testingUrls[i] );
                     }
                     else {
-                        console.warn( 'FAILED: ' + testingUrls[i] );
+                         p.setAttribute( 'style', 'color: #FFAAAA' );
+                        console.warn( 'FAILED(' + maxPixDif + '): ' + testingUrls[i] );
                     }
+                    var croppedURL = testingUrls[i].substr( testingUrls[i].lastIndexOf( '/' ) + 1 );
+                    croppedURL = croppedURL.slice( 0, -4 );
+                    var t = document.createTextNode( croppedURL );
+                    p.appendChild( t );
+                    div.appendChild( p );
+                    document.body.appendChild( div );
                     testingURL( i + 1 );
                 };
+
+                console.time( 'Default' );
                 img.src = testingUrls[i];
             }
         );
     }
 
     function compareCanvases( canvasA, canvasB ) {
+        var ctxA = canvasA.getContext( '2d' );
+        var ctxB = canvasB.getContext( '2d' );
+        var pixA, pixB;
+        var difR, difG, difB, difA;
+        var maxPixelDifference = 0;
+
+        if( canvasA.width != canvasB.width || canvasA.height != canvasB.height ) return false;
+
+        for( var w = 0; w < canvasA.width; w++ ) {
+            for( var h = 0; h < canvasA.height; h++ ) {
+                pixA = ctxA.getImageData( w, h, 1, 1 ).data;
+                pixB = ctxB.getImageData( w, h, 1, 1 ).data;
+
+                difR = Math.abs( pixA[0] - pixB[0] );
+                difG = Math.abs( pixA[1] - pixB[1] );
+                difB = Math.abs( pixA[2] - pixB[2] );
+                difA = Math.abs( pixA[3] - pixB[3] );
+
+                if( difR > maxPixelDifference ) { maxPixelDifference = difR; }
+                if( difG > maxPixelDifference ) { maxPixelDifference = difG; }
+                if( difB > maxPixelDifference ) { maxPixelDifference = difB; }
+                if( difA > maxPixelDifference ) { maxPixelDifference = difA; }
+            }
+        }
+        return maxPixelDifference;
+    }
+
+    function areCanvasesIdentical( canvasA, canvasB ) {
         //Get each canvas' data
         var dataUrlA = canvasA.toDataURL('image/png');
         var dataUrlB = canvasB.toDataURL('image/png');
