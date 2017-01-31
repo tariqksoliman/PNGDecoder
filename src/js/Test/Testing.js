@@ -1,5 +1,7 @@
 //Compares two pngs canvases: one from PNGDecoder, the other the default one.
 //type is a testUrls key to test a subset of images. Leave blank or set to 'all' to test all.
+//var decoder = require( '../PNGDecoder' );
+
 var Testing = function( type ) {
 
     //test pngs from resources/testPNGs/
@@ -43,7 +45,30 @@ var Testing = function( type ) {
                         'resources/testPNGs/s40i3p04.png',
                         'resources/testPNGs/s40n3p04.png'
                         ],
-        background:   [],
+        background:   [ 'resources/testPNGs/bgai4a08.png',
+                        'resources/testPNGs/bgai4a16.png',
+                        'resources/testPNGs/bgan6a08.png',
+                        'resources/testPNGs/bgan6a16.png',
+                        'resources/testPNGs/bgbn4a08.png',
+                        'resources/testPNGs/bggn4a16.png',
+                        'resources/testPNGs/bgwn6a08.png',
+                        'resources/testPNGs/bgyn6a16.png',
+                        ],
+        transparency: [ 'resources/testPNGs/tbbn0g04.png',
+                        'resources/testPNGs/tbbn2c16.png',
+                        'resources/testPNGs/tbbn3p08.png',
+                        'resources/testPNGs/tbgn2c16.png',
+                        'resources/testPNGs/tbgn3p08.png',
+                        'resources/testPNGs/tbrn2c08.png',
+                        'resources/testPNGs/tbwn0g16.png',
+                        'resources/testPNGs/tbwn3p08.png',
+                        'resources/testPNGs/tbyn3p08.png',
+                        'resources/testPNGs/tp0n0g08.png',
+                        'resources/testPNGs/tp0n2c08.png',
+                        'resources/testPNGs/tp0n3p08.png',
+                        'resources/testPNGs/tp1n3p08.png',
+                        'resources/testPNGs/tm3n3p02.png',
+                        ],
         gamma:        ['resources/testPNGs/g03n0g16.png', 'resources/testPNGs/g03n2c08.png', 'resources/testPNGs/g03n3p04.png', 'resources/testPNGs/g04n0g16.png', 'resources/testPNGs/g04n2c08.png',       'resources/testPNGs/g04n3p04.png', 'resources/testPNGs/g05n0g16.png', 'resources/testPNGs/g05n2c08.png', 'resources/testPNGs/g05n3p04.png', 'resources/testPNGs/g07n0g16.png', 'resources/testPNGs/g07n2c08.png', 'resources/testPNGs/g07n3p04.png', 'resources/testPNGs/g10n0g16.png', 'resources/testPNGs/g10n2c08.png', 'resources/testPNGs/g10n3p04.png', 'resources/testPNGs/g25n0g16.png', 'resources/testPNGs/g25n2c08.png', 'resources/testPNGs/g25n3p04.png'],
         filters:      ['resources/testPNGs/f00n0g08.png', 'resources/testPNGs/f00n2c08.png', 'resources/testPNGs/f01n0g08.png', 'resources/testPNGs/f01n2c08.png', 'resources/testPNGs/f02n0g08.png',       'resources/testPNGs/f02n2c08.png', 'resources/testPNGs/f03n0g08.png', 'resources/testPNGs/f03n2c08.png', 'resources/testPNGs/f04n0g08.png', 'resources/testPNGs/f04n2c08.png', 'resources/testPNGs/f99n0g04.png'],
         palettes:     [],
@@ -76,8 +101,8 @@ var Testing = function( type ) {
     }
     else {
         if( testUrls.hasOwnProperty( type ) ) {
-            testingUrls = [testUrls[type][3]];
-            //testingUrls = testUrls[type];
+            testingUrls = [testUrls[type][25]];
+            testingUrls = testUrls[type];
         }
         else {
             console.warn( 'Unknown testing type.' );
@@ -93,6 +118,7 @@ var Testing = function( type ) {
         console.time( 'PNGDecoder' )
         PNGDecoder( testingUrls[i],
             function( PNGcanvas, metadata ) {
+                if( !PNGcanvas || !metadata ) { testingURL( i + 1 ); return; }
                 console.log( metadata );
                 console.timeEnd( 'PNGDecoder' );
                 //Make it look nicer
@@ -106,13 +132,17 @@ var Testing = function( type ) {
                 div.appendChild( PNGcanvas );
                 
                 img.onload = function() {
-                    console.timeEnd( 'Default' );
                     REGcanvas.width = img.width;
-                    REGcanvas.height = img.height;                 
+                    REGcanvas.height = img.height;            
+                    ctx.mozImageSmoothingEnabled = false;
+                    ctx.webkitImageSmoothingEnabled = false;
+                    ctx.msImageSmoothingEnabled = false;
+                    ctx.imageSmoothingEnabled = false;     
                     ctx.drawImage( img, 0, 0 );
+                    console.timeEnd( 'Default' );
                     div.appendChild( REGcanvas );
                     var maxPixDif = compareCanvases( PNGcanvas, REGcanvas );
-                    if( maxPixDif < 2 ) {
+                    if( maxPixDif <= metadata.header.data.bitdepth ) {
                         p.setAttribute( 'style', 'color: #AAFFAA' );
                         console.info( 'PASSED(' + maxPixDif + '): ' + testingUrls[i] );
                     }
@@ -153,7 +183,12 @@ var Testing = function( type ) {
                 difG = Math.abs( pixA[1] - pixB[1] );
                 difB = Math.abs( pixA[2] - pixB[2] );
                 difA = Math.abs( pixA[3] - pixB[3] );
-
+                /*
+                if( difR != 0 ) console.log('R ' + pixA + ' ' + pixB + '(' + w + ',' + h +')' );
+                if( difG != 0 ) console.log('G ' + pixA + ' ' + pixB + '(' + w + ',' + h +')' );
+                if( difB != 0 ) console.log('B ' + pixA + ' ' + pixB + '(' + w + ',' + h +')' );
+                if( difA != 0 ) console.log('A ' + pixA + ' ' + pixB + '(' + w + ',' + h +')' );
+                */
                 if( difR > maxPixelDifference ) { maxPixelDifference = difR; }
                 if( difG > maxPixelDifference ) { maxPixelDifference = difG; }
                 if( difB > maxPixelDifference ) { maxPixelDifference = difB; }
@@ -171,4 +206,9 @@ var Testing = function( type ) {
         return dataUrlA == dataUrlB;
     }
 
-}    
+}
+
+//If we're running under Node, 
+if( typeof exports !== 'undefined' ) {
+    exports.Testing = Testing;
+}
