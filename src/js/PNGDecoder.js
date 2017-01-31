@@ -23,17 +23,20 @@ var PNGDecoder = function( url, callback ) {
   //Send our request
   return xhr.send(null);
 
-  //functions
+  //private functions
 
   function decode( data ) {
+    //An object so that it's passed by reference and gets updated
     var i = { i: 0 };
     var inflator = new pako.Inflate();
     var header;
     var chunks = [];
     var palette;
     var ancillaries = {
+      bKGD: null,
       gAMA: 1,
-      sBit: null
+      sBit: null,
+      tRNS: null,
     };
 
     //Check if file is a valid PNG
@@ -61,6 +64,9 @@ var PNGDecoder = function( url, callback ) {
               palette = usePalette( chunks[j] );
             break;
           //Ancillary chunks now
+          case 'bKGD':
+              ancillaries.bKGD = useBackground( chunks[j], header.data.colortype );
+            break;
           case 'gAMA':
               ancillaries.gAMA = useGamma( chunks[j] );
               //console.log( 'Gamma: ' + ancillaries.gAMA );
@@ -68,6 +74,9 @@ var PNGDecoder = function( url, callback ) {
           case 'sBIT':
               ancillaries.sBIT = useSBIT( chunks[j] );
               //console.log( ancillaries.sBIT );
+            break;
+          case 'tRNS':
+              ancillaries.tRNS = useTransparency( chunks[j], header.data.colortype );
             break;
 
         }
@@ -201,7 +210,7 @@ var PNGDecoder = function( url, callback ) {
     return header;
   }
 
-  //Ancilalry chunk setters
+  //Ancillary and PLTE chunk setters
 
   function usePalette( plte ) {
     var palette = [];
@@ -210,6 +219,19 @@ var PNGDecoder = function( url, callback ) {
       palette.push( { r: plte.data[i], g: plte.data[i+1], b: plte.data[i+2] } );
     }
     return palette;
+  }
+
+  function useBackground( bkgd, colortype ) {
+    var background = [];
+    switch( colortype ) {
+      case 3:
+          background = bkgd.data[0];
+        break;
+      default:
+          background = Uint8To( 16, null, bkgd.data );
+    }
+
+    return background;
   }
 
   function useGamma( gama ) {
@@ -226,6 +248,23 @@ var PNGDecoder = function( url, callback ) {
     }
 
     return sigbits;
+  }
+
+  //tRNS 
+  function useTransparency( trns, colortype ) {
+    var transparency = [];
+    switch( colortype ) {
+      case 0:
+      case 2:
+          transparency = Uint8To( 16, null, trns.data );
+        break;
+      case 3:
+        for( var i = 0; i < trns.data.length; i++ ) {
+          transparency[i] = trns.data[i];
+        }
+      break;
+    }
+    return transparency;
   }
 
   function getNextChunk( data, i ) {
@@ -259,7 +298,7 @@ var PNGDecoder = function( url, callback ) {
 
     i.i = i.i + 12 + chunk.length;
 
-    //console.log(chunk);
+    //console.log(chunk.type.full);
     return chunk;
   }
 
@@ -274,6 +313,10 @@ var PNGDecoder = function( url, callback ) {
     canvas.height = height;
 
     var context = canvas.getContext( '2d' );
+    context.mozImageSmoothingEnabled = false;
+    context.webkitImageSmoothingEnabled = false;
+    context.msImageSmoothingEnabled = false;
+    context.imageSmoothingEnabled = false;  
     var imgData = context.createImageData( width, height );
     var bands = 1;
     switch( header.data.colortype ) {
@@ -303,7 +346,34 @@ var PNGDecoder = function( url, callback ) {
     console.log( 'dataWidth: ' + dataWidth );
     console.log( 'dataWidth * width: ' + dataWidth * width );
     */
-    //return canvas;
+    /*
+    t = [0, 200, 200, 100, 50,
+         1, 100,  40,  60, 80 ];
+    console.log( t );
+    console.log( unfilter( t, 1, 1, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 2, 1, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 3, 1, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 4, 1, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 6, 2, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 7, 2, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 8, 2, 2, 2, 1, 16 ) );
+    console.log( t );
+    console.log( unfilter( t, 9, 2, 2, 2, 1, 16 ) );
+    console.log( t );
+    return null;
+    */
+    //console.log( ancillaries.bKGD );
+    
+    var color = { r: 0, g: 0, b: 0, a: 0 };
+    //correctedColor
+    var ccolor = {};
+
     if( palette ) {
       //console.log(palette);
       for( var y = 0; y < height; y++ ) {
@@ -321,16 +391,32 @@ var PNGDecoder = function( url, callback ) {
       pixelData = Uint8To( header.data.bitdepth, null, rawPixelData );
       //console.log(pixelData);
       
-      var color;
       dataindex = 0;
+      
       for( var y = 0; y < height; y++ ) {
+
         for( var x = 0; x < width; x++ ) {
-          //console.log( pixelData[dataindex] );
-          color = palette[pixelData[dataindex]] || { r: 0, g: 0, b: 0 };
-          imgData.data[ imgdataindex + 0 ] = 255 * Math.pow( color.r / 255, 1 / ancillaries.gAMA ); //Red
-          imgData.data[ imgdataindex + 1 ] = 255 * Math.pow( color.g / 255, 1 / ancillaries.gAMA ); //Green
-          imgData.data[ imgdataindex + 2 ] = 255 * Math.pow( color.b / 255, 1 / ancillaries.gAMA ); //Blue
-          imgData.data[ imgdataindex + 3 ] = ( bands == 4 ) ? 255 : 255; //Alpha
+
+          color = palette[pixelData[dataindex]] || { r: 0, g: 0, b: 0, a: 0 };
+          //correct for gamma
+          ccolor.r = 255 * Math.pow( color.r / 255, 1 / ancillaries.gAMA );
+          ccolor.g = 255 * Math.pow( color.g / 255, 1 / ancillaries.gAMA );
+          ccolor.b = 255 * Math.pow( color.b / 255, 1 / ancillaries.gAMA );
+          ccolor.a = ( ancillaries.tRNS && ancillaries.tRNS[pixelData[dataindex]] ) ? ancillaries.tRNS[pixelData[dataindex]] : 255;
+
+          //correct for background blending formula: https://drafts.fxtf.org/compositing-1/#simplealphacompositing
+          
+          if( ancillaries.bKGD && false ) {
+            ccolor.r = ( ( (ccolor.r / 255) * (ccolor.a / 255) ) + ( ( (palette[ ancillaries.bkGD[0] ].r / 255) * 1 ) * ( 1 - (ccolor.a / 255) ) ) ) * 255;
+            ccolor.g = ( ( (ccolor.g / 255) * (ccolor.a / 255) ) + ( ( (palette[ ancillaries.bkGD[0] ].g / 255) * 1 ) * ( 1 - (ccolor.a / 255) ) ) ) * 255;
+            ccolor.b = ( ( (ccolor.b / 255) * (ccolor.a / 255) ) + ( ( (palette[ ancillaries.bkGD[0] ].b / 255) * 1 ) * ( 1 - (ccolor.a / 255) ) ) ) * 255;
+            ccolor.a = 255;
+          }
+
+          imgData.data[ imgdataindex + 0 ] = ccolor.r; //Red
+          imgData.data[ imgdataindex + 1 ] = ccolor.g; //Green
+          imgData.data[ imgdataindex + 2 ] = ccolor.b; //Blue
+          imgData.data[ imgdataindex + 3 ] = ccolor.a; //Alpha
 
           dataindex += 1;
           imgdataindex += 4;
@@ -351,7 +437,7 @@ var PNGDecoder = function( url, callback ) {
         //filter = data[ y * ((width*bands) + 1) ];
         filter = getFilter( data, y, header.data.bitdepth, bands, width );
         //console.log(filter);
-        if( !(filter >= 0 && filter <= 4) ) return canvas;
+        if( !(filter >= 0 && filter <= 4) ) return {};
 
         for( var x = 0; x < dataWidth; x++ ) {
           for( var b = 0; b < bands; b++ ) {
@@ -367,7 +453,7 @@ var PNGDecoder = function( url, callback ) {
       //console.log(pixelData);
       var scalar = ( Math.pow( 2, header.data.bitdepth ) - 1 );
       //console.log(scalar);
-      var value;
+      var value, avalue;
 
       for( var y = 0; y < height; y++ ) {
       
@@ -375,19 +461,37 @@ var PNGDecoder = function( url, callback ) {
           switch( header.data.colortype ) {
             case 0:
             case 4:
-              value = Math.pow( pixelData[ pixdataindex ] / scalar, 1 / ancillaries.gAMA ) * 255;
+              color.r = Math.pow( pixelData[ pixdataindex ] / scalar, 1 / ancillaries.gAMA ) * 255;
+              color.a = ( header.data.colortype == 4 ) ? ( pixelData[ pixdataindex + 1 ] / scalar ) * 255 : 255;
 
-              imgData.data[ imgdataindex + 0 ] = value; //Red
-              imgData.data[ imgdataindex + 1 ] = value; //Green
-              imgData.data[ imgdataindex + 2 ] = value; //Blue
-              imgData.data[ imgdataindex + 3 ] = ( header.data.colortype == 4 ) ? ( pixelData[ pixdataindex + 1 ] / scalar ) * 255 : 255; //Alpha
+              if( ancillaries.bKGD ) {
+                color.r = ( ( (color.r / 255) * (color.a / 255) ) + ( ( (ancillaries.bKGD[0] / scalar) * 1 ) * ( 1 - (color.a / 255) ) ) ) * 255;
+                color.a = 255;
+              }
+
+              imgData.data[ imgdataindex + 0 ] = color.r; //Red
+              imgData.data[ imgdataindex + 1 ] = color.r; //Green
+              imgData.data[ imgdataindex + 2 ] = color.r; //Blue
+              imgData.data[ imgdataindex + 3 ] = color.a //Alpha
               
               break;
             default:
-              imgData.data[ imgdataindex + 0 ] = Math.pow( pixelData[ pixdataindex + 0 ] / scalar, 1 / ancillaries.gAMA ) * 255; //Red
-              imgData.data[ imgdataindex + 1 ] = Math.pow( pixelData[ pixdataindex + 1 ] / scalar, 1 / ancillaries.gAMA ) * 255; //Green
-              imgData.data[ imgdataindex + 2 ] = Math.pow( pixelData[ pixdataindex + 2 ] / scalar, 1 / ancillaries.gAMA ) * 255; //Blue
-              imgData.data[ imgdataindex + 3 ] = ( header.data.colortype == 6 ) ?  ( pixelData[ pixdataindex + 3 ] / scalar ) * 255 : 255; //Alpha
+              color.r = Math.pow( pixelData[ pixdataindex + 0 ] / scalar, 1 / ancillaries.gAMA ) * 255;
+              color.g = Math.pow( pixelData[ pixdataindex + 1 ] / scalar, 1 / ancillaries.gAMA ) * 255;
+              color.b = Math.pow( pixelData[ pixdataindex + 2 ] / scalar, 1 / ancillaries.gAMA ) * 255;
+              color.a = ( header.data.colortype == 6 ) ? ( pixelData[ pixdataindex + 3 ] / scalar ) * 255 : 255;
+
+              if( ancillaries.bKGD && ( header.data.colortype == 2 || header.data.colortype == 6 ) ) {
+                color.r = ( ( (color.r / 255) * (color.a / 255) ) + ( ( (ancillaries.bKGD[0] / scalar) * 1 ) * ( 1 - (color.a / 255) ) ) ) * 255;
+                color.g = ( ( (color.g / 255) * (color.a / 255) ) + ( ( (ancillaries.bKGD[1] / scalar) * 1 ) * ( 1 - (color.a / 255) ) ) ) * 255;
+                color.b = ( ( (color.b / 255) * (color.a / 255) ) + ( ( (ancillaries.bKGD[2] / scalar) * 1 ) * ( 1 - (color.a / 255) ) ) ) * 255;
+                color.a = 255;
+              }
+
+              imgData.data[ imgdataindex + 0 ] = color.r; //Red
+              imgData.data[ imgdataindex + 1 ] = color.g; //Green
+              imgData.data[ imgdataindex + 2 ] = color.b; //Blue
+              imgData.data[ imgdataindex + 3 ] = color.a; //Alpha
           }
           pixdataindex += bands;
           imgdataindex += 4;
@@ -405,6 +509,8 @@ var PNGDecoder = function( url, callback ) {
         } 
       };
   }
+
+  //Helper functions
 
   function get4ByteInt( data, i ) {
     var b0 = padByteString( data[i+0].toString(2) );
@@ -469,6 +575,8 @@ var PNGDecoder = function( url, callback ) {
     return newData;
   }
 
+  //Filter functions
+
   function getFilter( data, line, bitdepth, bands, width ) {
     return data[ line * ( ( ( width / ( 8 / bitdepth ) ) * bands ) + 1 ) ];
   }
@@ -479,15 +587,21 @@ var PNGDecoder = function( url, callback ) {
     //b	the byte corresponding to x in the previous scanline;
     //c	the byte corresponding to b in the pixel immediately before the pixel containing b (or the byte immediately before b, when the bit depth is less than 8).
     var bytesPerScanline = ( ( width / ( 8 / bitdepth ) ) * bands ) + 1;
-
+    //console.log( bytesPerScanline );
     //console.log( 'bpsl: ' + bytesPerScanline );
     switch( filter ) {
       case 0:
         break;
       case 1: //Recon(x) = Filt(x) + Recon(a)
+          //console.log( index + '  =======================' );
+          //console.log( 'val: ' + data[index] );
+          //console.log( 'left: ' + getA(index) );
           data[index] = ( data[index] + getA(index) ) % 256;
         break;
       case 2: //Recon(x) = Filt(x) + Recon(b)
+          //console.log( index + '  =======================' );
+          //console.log( 'val: ' + data[index] );
+          //console.log( 'up: ' + getB(index) );
           data[index] = ( data[index] + getB(index) ) % 256;
         break;
       case 3: //Filt(x) + floor((Recon(a) + Recon(b)) / 2)
@@ -502,11 +616,13 @@ var PNGDecoder = function( url, callback ) {
 
     return data[index];
 
+    //A is the pixel value to the left, getI, when true, returns data's index instead of value
     function getA( i, getI ) {
       var a = -1;
       var scanlineNum = Math.floor( i / bytesPerScanline );
       //- 1 for filter byte
       var aScanlineNum = Math.floor( ( i - ( bands * Math.ceil( bitdepth / 8 ) ) - 1 ) / bytesPerScanline );
+      //console.log( scanlineNum + ' ' + aScanlineNum );
       //Make sure a is on the same scan line and is not the filter bit
       if( scanlineNum == aScanlineNum ) {
         a = i - ( bands * Math.ceil( bitdepth / 8 ) );
@@ -522,6 +638,7 @@ var PNGDecoder = function( url, callback ) {
       return a;
     }
 
+    //B is the pixel value above, getI, when true, returns data's index instead of value
     function getB( i, getI ) {
       var b = -1;
       if( i - bytesPerScanline > 0 ) {
@@ -538,6 +655,7 @@ var PNGDecoder = function( url, callback ) {
       return b;
     }
 
+    //A is the pixel value above and to the left
     function getC( i ) { //this is the getA of getB
       var a = getA( i, true );
       if( a == -1 ) return 0;
@@ -558,4 +676,9 @@ var PNGDecoder = function( url, callback ) {
     }
 
   }
+}
+
+//If we're running under Node, 
+if( typeof exports !== 'undefined' ) {
+    exports.PNGDecoder = PNGDecoder;
 }

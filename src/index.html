@@ -9,7 +9,7 @@
         Note: Pako must be loaded before this
       -->
       <script type='text/javascript' src='js/PNGDecoder.js'></script>
-      <script type='text/javascript' src='js/Testing.js'></script>
+      <script type='text/javascript' src='js/Test/Testing.js'></script>
       <style>
           body {
             color: white;
@@ -69,11 +69,14 @@
         test = true;
 
         if( test ) {
-          Testing( 'all' );
+          //Testing( 'all' );
           //Testing( 'basic' );
           //Testing( 'odd' );
+          //Testing( 'background' );
+          Testing( 'transparency' );
           //Testing( 'gamma' );
           //Testing( 'filters' );
+          //Testing( 'other' );
         }
         else {
           PNGDecoder(
